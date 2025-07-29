@@ -216,8 +216,8 @@
     </select>
 
     <label for="quality">JPEG Quality:</label>
-    <input type="range" id="quality" min="10" max="100" value="30" step="5">
-    <div class="quality-value" id="qualityValue">Quality: 30%</div>
+    <input type="range" id="quality" min="10" max="100" value="20" step="5">
+    <div class="quality-value" id="qualityValue">Quality: 20%</div>
 
     <button id="applyQuality">Apply Changes</button>
 </div>
@@ -247,6 +247,12 @@
 
         // Initialize video feed with default low quality
         updateVideoQuality();
+        
+        // Setup video reconnection
+        setupVideoReconnection();
+        
+        // Setup periodic refresh
+        setupPeriodicRefresh();
 
         // Update quality value display when slider changes
         qualitySlider.addEventListener('input', function() {
@@ -441,6 +447,34 @@ Raw pan value: ${clampedX * 90}`);
                     console.error('Error setting position:', error);
                     updateDebugInfo(`Error: ${error.message}`);
                 });
+        }
+        
+        // Function to setup video reconnection when errors occur
+        function setupVideoReconnection() {
+            const videoFeed = document.querySelector('.video-background');
+            
+            // Add error event listener to detect when the stream fails
+            videoFeed.addEventListener('error', function(e) {
+                console.log('Video feed error detected, reconnecting...');
+                updateDebugInfo('Video feed error detected, reconnecting...');
+                
+                // Wait a short time before reconnecting
+                setTimeout(function() {
+                    // Reconnect with a new timestamp
+                    updateVideoQuality();
+                    updateDebugInfo('Video feed reconnection attempted');
+                }, 1000); // Wait 1 second before reconnecting
+            });
+        }
+        
+        // Function to setup periodic refresh of the video feed
+        function setupPeriodicRefresh() {
+            // Refresh video feed every 25 seconds (just before the 30-second failure point)
+            setInterval(function() {
+                console.log('Performing periodic video feed refresh');
+                updateDebugInfo('Performing periodic video feed refresh');
+                updateVideoQuality();
+            }, 25000); // 25 seconds
         }
     });
 </script>
