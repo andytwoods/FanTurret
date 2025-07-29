@@ -247,10 +247,10 @@
 
         // Initialize video feed with default low quality
         updateVideoQuality();
-        
+
         // Setup video reconnection
         setupVideoReconnection();
-        
+
         // Setup periodic refresh
         setupPeriodicRefresh();
 
@@ -448,16 +448,16 @@ Raw pan value: ${clampedX * 90}`);
                     updateDebugInfo(`Error: ${error.message}`);
                 });
         }
-        
+
         // Function to setup video reconnection when errors occur
         function setupVideoReconnection() {
             const videoFeed = document.querySelector('.video-background');
-            
+
             // Add error event listener to detect when the stream fails
             videoFeed.addEventListener('error', function(e) {
                 console.log('Video feed error detected, reconnecting...');
                 updateDebugInfo('Video feed error detected, reconnecting...');
-                
+
                 // Wait a short time before reconnecting
                 setTimeout(function() {
                     // Reconnect with a new timestamp
@@ -466,7 +466,7 @@ Raw pan value: ${clampedX * 90}`);
                 }, 1000); // Wait 1 second before reconnecting
             });
         }
-        
+
         // Function to setup periodic refresh of the video feed
         function setupPeriodicRefresh() {
             // Refresh video feed every 25 seconds (just before the 30-second failure point)
