@@ -269,6 +269,14 @@
         }
 
     </style>
+    <script type="module">
+    import { FilesetResolver, PoseLandmarker, HandLandmarker, FaceLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.7";
+    // Re-export on window so the non-module script can use the globals.
+    window.FilesetResolver = FilesetResolver;
+    window.PoseLandmarker  = PoseLandmarker;
+    window.HandLandmarker  = HandLandmarker;
+    window.FaceLandmarker  = FaceLandmarker;
+</script>
 </head>
 <body>
 <h1>Pan-Tilt Control</h1>
@@ -308,22 +316,12 @@
     <button id="applyQuality">Apply Changes</button>
 </div>
 
-<script type="module">
-    import {FilesetResolver, PoseLandmarker} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.7";
-    // Re‑export on window so the non‑module script can use the globals.
-    window.FilesetResolver = FilesetResolver;
-    window.PoseLandmarker = PoseLandmarker;
-</script>
-
-
 <script>
     document.addEventListener('DOMContentLoaded', function () {
         const container = document.getElementById('controlContainer');
         const element = document.getElementById('controlElement');
         const status = document.getElementById('status');
         const debugInfo = document.getElementById('debugInfo');
-
-        // Quality control elements
         const videoFeed = document.querySelector('.video-background');
         const qualitySlider = document.getElementById('quality');
         const qualityValue = document.getElementById('qualityValue');
@@ -337,69 +335,155 @@
         let currentTilt = 0;
         let debugLog = [];
 
-        // Initialize element at center
-        updateElementPosition(0, 0);
-        updateDebugInfo("Initialized at center");
+        // --- NEW: Variables for MediaPipe and Auto-tracking ---
+        let poseLandmarker;
+        let handLandmarker;
+        let faceLandmarker;
+        let mediaPipeReady = false;
+        // Proportional gain for the controller. A small value creates smooth movement.
+        const trackingGain = 0.1;
+        let lastExecutionTime = 0;
+        const executionInterval = 100; // ms, to prevent sending too many requests
 
-        // Initialize video feed with default low quality
-        updateVideoQuality();
-
-        // Setup video reconnection
-        setupVideoReconnection();
-
-        // Setup periodic refresh
-        setupPeriodicRefresh();
-
-        async function initPose() {
+        // --- MODIFIED: Renamed initPose to initMediaPipe and expanded it ---
+        async function initMediaPipe() {
             const vision = await FilesetResolver.forVisionTasks(
                 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.7/wasm'
             );
 
+            const baseOptions = { delegate: 'GPU' };
+
+            // Initialize all three landmarkers
             poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-                baseOptions: {
-                    modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
-                    delegate: 'GPU'
-                },
+                baseOptions: { ...baseOptions, modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task' },
                 runningMode: 'IMAGE',
                 numPoses: 1
             });
-            poseReady = true;
-            debug('Pose model loaded');
+
+            handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                baseOptions: { ...baseOptions, modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task' },
+                runningMode: 'IMAGE',
+                numHands: 1
+            });
+
+            faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+                baseOptions: { ...baseOptions, modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task' },
+                runningMode: 'IMAGE',
+                numFaces: 1
+            });
+
+            mediaPipeReady = true;
+            debug('MediaPipe models loaded');
             requestAnimationFrame(processFrame);
         }
 
-        let poseReady = false;
-
         function processFrame() {
-            if (!poseReady) return;
-            if (videoFeed.naturalWidth === 0) return requestAnimationFrame(processFrame);
+            if (!mediaPipeReady || videoFeed.naturalWidth === 0) {
+                requestAnimationFrame(processFrame);
+                return;
+            }
 
             if (poseCanvas.width !== videoFeed.naturalWidth) {
                 poseCanvas.width = videoFeed.naturalWidth;
                 poseCanvas.height = videoFeed.naturalHeight;
             }
 
-            poseCtx.drawImage(videoFeed, 0, 0, poseCanvas.width, poseCanvas.height);
-            const results = poseLandmarker.detect(poseCanvas);
+            // --- MODIFIED: Call auto-tracking logic ---
+            autoTrack();
 
+            // Drawing logic (can be kept to visualize detections)
+            const poseResults = poseLandmarker.detect(videoFeed);
             poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
             poseCtx.drawImage(videoFeed, 0, 0, poseCanvas.width, poseCanvas.height);
 
-            if (results.landmarks?.length) drawSkeleton(results.landmarks[0]);
+            if (poseResults.landmarks?.length) {
+                drawSkeleton(poseResults.landmarks[0]);
+            }
+
             requestAnimationFrame(processFrame);
         }
 
+        // --- NEW: Auto-tracking function ---
+        function autoTrack() {
+            // Don't track if the user is manually dragging the control
+            if (isDragging) return;
+
+            // Throttle execution to avoid overwhelming the server
+            const now = performance.now();
+            if (now - lastExecutionTime < executionInterval) {
+                return;
+            }
+            lastExecutionTime = now;
+
+            let target = null;
+
+            // 1. Check for hands (highest priority)
+            const handResults = handLandmarker.detect(videoFeed);
+            if (handResults.landmarks?.length) {
+                // Use the wrist as the target center
+                target = handResults.landmarks[0][0];
+                updateDebugInfo("Tracking hand");
+            } else {
+                // 2. If no hands, check for faces
+                const faceResults = faceLandmarker.detect(videoFeed);
+                if (faceResults.faceLandmarks?.length) {
+                    // Use the nose tip as the target center
+                    target = faceResults.faceLandmarks[0][1];
+                    updateDebugInfo("Tracking face");
+                }
+            }
+
+            if (target) {
+                // The target coordinates are normalized (0.0 to 1.0).
+                // The center of the screen is (0.5, 0.5).
+
+                // Calculate the error (how far the target is from the center)
+                const errorX = target.x - 0.5;
+                const errorY = target.y - 0.5;
+
+                // Calculate the required adjustment using the proportional gain
+                // This creates a small, smooth nudge towards the center
+                const adjustmentX = errorX * trackingGain;
+                const adjustmentY = errorY * trackingGain;
+
+                // Get the current control position (from -1 to 1)
+                const currentX = currentPan / 90.0;
+                const currentY = -currentTilt / 90.0; // Y is inverted
+
+                // Calculate the new desired position
+                let newX = currentX + adjustmentX;
+                let newY = currentY - adjustmentY
+
+                // Clamp the values to stay within the valid range [-1, 1]
+                const clampedX = Math.max(-1, Math.min(1, newX));
+                const clampedY = Math.max(-1, Math.min(1, newY));
+
+                // --- This is the core control section ---
+                // Update the position of the red dot on screen
+                updateElementPosition(clampedX, clampedY);
+
+                // Update the pan/tilt values from the new dot position
+                currentPan = Math.round(clampedX * 90);
+                currentTilt = Math.round(clampedY * -90); // Invert Y for tilt
+
+                // Update the status text
+                updateStatus();
+
+                // Send the new position to the server
+                sendPosition();
+            }
+        }
+
+        // --- The rest of the script remains largely the same ---
+
         function drawSkeleton(landmarks) {
             poseCtx.lineWidth = 2;
-            poseCtx.strokeStyle = 'red';   // Line color
-            poseCtx.fillStyle = 'cyan';  // Dot color
+            poseCtx.strokeStyle = 'red';
+            poseCtx.fillStyle = 'cyan';
 
-            // Draw the connecting lines
             PoseLandmarker.POSE_CONNECTIONS.forEach(connection => {
                 const startLandmark = landmarks[connection.start];
                 const endLandmark = landmarks[connection.end];
-
-                // Ensure both landmarks exist before drawing
                 if (startLandmark && endLandmark) {
                     poseCtx.beginPath();
                     poseCtx.moveTo(startLandmark.x * poseCanvas.width, startLandmark.y * poseCanvas.height);
@@ -408,7 +492,6 @@
                 }
             });
 
-            // Draw the landmark points (dots)
             landmarks.forEach(lm => {
                 poseCtx.beginPath();
                 poseCtx.arc(lm.x * poseCanvas.width, lm.y * poseCanvas.height, 3, 0, Math.PI * 2);
@@ -420,55 +503,45 @@
             console.log(`${msg}\n`);
         }
 
+        // MODIFIED: Call initMediaPipe instead of initPose
         videoFeed.addEventListener('load', () => {
-            if (!poseReady) initPose();
+            if (!mediaPipeReady) initMediaPipe();
         });
 
-
-        // Update quality value display when slider changes
         qualitySlider.addEventListener('input', function () {
             qualityValue.textContent = `Quality: ${qualitySlider.value}%`;
         });
 
-        // Apply quality changes when button is clicked
         applyQualityBtn.addEventListener('click', function () {
             updateVideoQuality();
             updateDebugInfo(`Video quality updated: ${resolutionSelect.value} resolution, ${qualitySlider.value}% quality`);
         });
 
-        // Function to update video feed with new quality settings
         function updateVideoQuality() {
             const quality = qualitySlider.value;
             const resolution = resolutionSelect.value;
-
-            // Update the video feed source URL with quality parameters
-            const timestamp = new Date().getTime(); // Add timestamp to prevent caching
+            const timestamp = new Date().getTime();
             videoFeed.src = `/video_feed?quality=${quality}&resolution=${resolution}&t=${timestamp}`;
         }
 
-        // Mouse events
+        // --- Drag and position functions (unchanged) ---
         element.addEventListener('mousedown', startDrag);
         document.addEventListener('mousemove', drag);
         document.addEventListener('mouseup', endDrag);
-
-        // Touch events
         element.addEventListener('touchstart', startDrag);
         document.addEventListener('touchmove', drag);
         document.addEventListener('touchend', endDrag);
-
-        // Direct container click/touch
         container.addEventListener('mousedown', containerClick);
         container.addEventListener('touchstart', containerClick);
 
         function startDrag(e) {
             isDragging = true;
-            updateDebugInfo("Drag started");
+            updateDebugInfo("Drag started. Auto-tracking paused.");
             e.preventDefault();
         }
 
         function drag(e) {
             if (!isDragging) return;
-
             const containerRect = container.getBoundingClientRect();
             let clientX, clientY;
 
@@ -480,52 +553,29 @@
                 clientY = e.clientY;
             }
 
-            // Calculate position relative to container center
             const centerX = containerRect.left + containerRect.width / 2;
             const centerY = containerRect.top + containerRect.height / 2;
-
-            // Calculate position as percentage from center (-1 to 1)
             const xPercent = (clientX - centerX) / (containerRect.width / 2);
             const yPercent = (clientY - centerY) / (containerRect.height / 2);
-
-            // Clamp values to stay within container
             const clampedX = Math.max(-1, Math.min(1, xPercent));
             const clampedY = Math.max(-1, Math.min(1, yPercent));
 
-            // Debug position calculation
-            updateDebugInfo(`Position calculation:
-clientX: ${Math.round(clientX)}, centerX: ${Math.round(centerX)}
-xPercent: ${xPercent.toFixed(2)}, clampedX: ${clampedX.toFixed(2)}
-Raw pan value: ${clampedX * 90}`);
-
-            // Update element position
-
             updateElementPosition(clampedX, clampedY);
-
-            // Convert to pan/tilt values (-90 to 90 degrees)
-            // Explicitly ensure the full range from -90 to 90
             currentPan = Math.max(-90, Math.min(90, Math.round(clampedX * 90)));
-            currentTilt = Math.max(-90, Math.min(90, Math.round(clampedY * -90))); // Invert Y for tilt
-
-            // Update status display
+            currentTilt = Math.max(-90, Math.min(90, Math.round(clampedY * -90)));
             updateStatus();
-
-            // Send values to server
             sendPosition();
-
             e.preventDefault();
         }
 
         function endDrag() {
             isDragging = false;
-            updateDebugInfo("Drag ended");
+            updateDebugInfo("Drag ended. Auto-tracking resumed.");
         }
 
         function containerClick(e) {
-            // Allow clicking/touching directly on the container
             const containerRect = container.getBoundingClientRect();
             let clientX, clientY;
-
             if (e.type.startsWith('touch')) {
                 clientX = e.touches[0].clientX;
                 clientY = e.touches[0].clientY;
@@ -534,48 +584,24 @@ Raw pan value: ${clampedX * 90}`);
                 clientY = e.clientY;
             }
 
-            // Calculate position relative to container center
             const centerX = containerRect.left + containerRect.width / 2;
             const centerY = containerRect.top + containerRect.height / 2;
-
-            // Calculate position as percentage from center (-1 to 1)
             const xPercent = (clientX - centerX) / (containerRect.width / 2);
             const yPercent = (clientY - centerY) / (containerRect.height / 2);
-
-            // Clamp values to stay within container
             const clampedX = Math.max(-1, Math.min(1, xPercent));
             const clampedY = Math.max(-1, Math.min(1, yPercent));
 
-            // Debug position calculation
-            updateDebugInfo(`Container click:
-clientX: ${Math.round(clientX)}, centerX: ${Math.round(centerX)}
-xPercent: ${xPercent.toFixed(2)}, clampedX: ${clampedX.toFixed(2)}
-Raw pan value: ${clampedX * 90}`);
-
-            // Update element position
             updateElementPosition(clampedX, clampedY);
-
-            // Convert to pan/tilt values (-90 to 90 degrees)
-            // Explicitly ensure the full range from -90 to 90
             currentPan = Math.max(-90, Math.min(90, Math.round(clampedX * 90)));
-            currentTilt = Math.max(-90, Math.min(90, Math.round(clampedY * -90))); // Invert Y for tilt
-
-            // Update status display
+            currentTilt = Math.max(-90, Math.min(90, Math.round(clampedY * -90)));
             updateStatus();
-
-            // Send values to server
             sendPosition();
-
-            // Start dragging
             isDragging = true;
         }
 
-
         function updateElementPosition(xPercent, yPercent) {
-            // Convert -1 to 1 range to percentage within container
             const leftPercent = 50 + xPercent * 50;
             const topPercent = 50 + yPercent * 50;
-
             element.style.left = `${leftPercent}%`;
             element.style.top = `${topPercent}%`;
         }
@@ -585,70 +611,49 @@ Raw pan value: ${clampedX * 90}`);
         }
 
         function updateDebugInfo(message) {
-            // Keep only the last 5 debug messages
             debugLog.unshift(message);
             if (debugLog.length > 5) {
                 debugLog.pop();
             }
-
-            // Update the debug info display
             debugInfo.textContent = debugLog.join('\n\n');
         }
 
         function sendPosition() {
-            // Ensure pan values can be negative
-            updateDebugInfo(`Sending values - Pan: ${currentPan}, Tilt: ${currentTilt}`);
-
-            // Send the position to the server
-            // Properly encode URL parameters to handle negative values
             const encodedPan = encodeURIComponent(currentPan + 1000);
             const encodedTilt = encodeURIComponent(currentTilt + 1000);
-
             fetch(`/set/${encodedPan}/${encodedTilt}/0`)
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! Status: ${response.status}`);
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    console.log('Position set:', data);
-                    console.log('Sent values - Pan:', currentPan, 'Tilt:', currentTilt);
-                })
-                .catch(error => {
-                    console.error('Error setting position:', error);
-                    updateDebugInfo(`Error: ${error.message}`);
-                });
+                .then(response => { if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`); return response.json(); })
+                .then(data => { console.log('Position set:', data); })
+                .catch(error => { console.error('Error setting position:', error); updateDebugInfo(`Error: ${error.message}`); });
         }
 
-        // Function to setup video reconnection when errors occur
-        function setupVideoReconnection() {
-            const videoFeed = document.querySelector('.video-background');
+        // --- Initialization and reconnection (unchanged) ---
+        updateElementPosition(0, 0);
+        updateDebugInfo("Initialized at center");
+        updateVideoQuality();
+        setupVideoReconnection();
+        setupPeriodicRefresh();
 
-            // Add error event listener to detect when the stream fails
+        function setupVideoReconnection() {
             videoFeed.addEventListener('error', function (e) {
                 console.log('Video feed error detected, reconnecting...');
                 updateDebugInfo('Video feed error detected, reconnecting...');
-
-                // Wait a short time before reconnecting
                 setTimeout(function () {
-                    // Reconnect with a new timestamp
                     updateVideoQuality();
                     updateDebugInfo('Video feed reconnection attempted');
-                }, 1000); // Wait 1 second before reconnecting
+                }, 1000);
             });
         }
 
-        // Function to setup periodic refresh of the video feed
         function setupPeriodicRefresh() {
-            // Refresh video feed every 25 seconds (just before the 30-second failure point)
             setInterval(function () {
                 console.log('Performing periodic video feed refresh');
                 updateDebugInfo('Performing periodic video feed refresh');
                 updateVideoQuality();
-            }, 25000); // 25 seconds
+            }, 25000);
         }
     });
 </script>
+
 </body>
 </html>
