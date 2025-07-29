@@ -219,6 +219,7 @@ def get_available_cameras(max_to_check=10):
                 if success:
                     available_cameras.append(i)
                     print(f"Found working camera at index {i}")
+                    break
                 else:
                     print(f"Camera at index {i} opened but frame read failed")
                 cap.release()

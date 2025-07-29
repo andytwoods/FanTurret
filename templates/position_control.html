@@ -1,0 +1,448 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pan-Tilt Control</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+
+        h1 {
+            margin-bottom: 20px;
+        }
+
+        .control-container {
+            position: relative;
+            width: 300px;
+            height: 300px;
+            background-color: transparent;  /* Changed from #ddd to transparent */
+            border: 2px solid #999;
+            touch-action: none;
+            overflow: hidden;  /* Added to ensure the video stays within the container */
+        }
+
+        .video-background {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;  /* Cover the container while maintaining aspect ratio */
+            z-index: 0;  /* Ensure the video is behind other elements */
+        }
+
+        .control-element {
+            position: absolute;
+            width: 30px;
+            height: 30px;
+            background-color: #ff5722;
+            border-radius: 50%;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            cursor: pointer;
+            user-select: none;
+            touch-action: none;
+            z-index: 1;  /* Ensure it appears above the video */
+        }
+
+        .center-indicator {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background-color: #000;
+            border-radius: 50%;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 1;  /* Ensure it appears above the video */
+        }
+
+        .axis-line {
+            position: absolute;
+            background-color: rgba(0, 0, 0, 0.2);
+            pointer-events: none;
+            z-index: 1;  /* Ensure it appears above the video */
+        }
+
+        .horizontal-axis {
+            width: 100%;
+            height: 1px;
+            top: 50%;
+        }
+
+        .vertical-axis {
+            width: 1px;
+            height: 100%;
+            left: 50%;
+        }
+
+        .boundary-indicator {
+            position: absolute;
+            background-color: rgba(255, 0, 0, 0.3);
+            pointer-events: none;
+            z-index: 1;  /* Ensure it appears above the video */
+        }
+
+        .left-boundary {
+            width: 2px;
+            height: 100%;
+            left: 0;
+        }
+
+        .right-boundary {
+            width: 2px;
+            height: 100%;
+            right: 0;
+        }
+
+        .top-boundary {
+            width: 100%;
+            height: 2px;
+            top: 0;
+        }
+
+        .bottom-boundary {
+            width: 100%;
+            height: 2px;
+            bottom: 0;
+        }
+
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #fff;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 300px;
+            text-align: center;
+        }
+
+        .debug-info {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f8f8f8;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 300px;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        .quality-controls {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #fff;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 300px;
+        }
+
+        .quality-controls label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        .quality-controls select,
+        .quality-controls input[type="range"] {
+            width: 100%;
+            margin-bottom: 10px;
+        }
+
+        .quality-controls .quality-value {
+            text-align: center;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+
+        .quality-controls button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 14px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+<h1>Pan-Tilt Control</h1>
+<div class="control-container" id="controlContainer">
+    <img src="/video_feed" class="video-background" alt="Webcam Feed">
+    <div class="control-element" id="controlElement"></div>
+    <!-- Visual indicators -->
+    <div class="center-indicator"></div>
+    <div class="axis-line horizontal-axis"></div>
+    <div class="axis-line vertical-axis"></div>
+    <div class="boundary-indicator left-boundary"></div>
+    <div class="boundary-indicator right-boundary"></div>
+    <div class="boundary-indicator top-boundary"></div>
+    <div class="boundary-indicator bottom-boundary"></div>
+</div>
+<div class="status" id="status">
+    Pan: 0°, Tilt: 0°
+</div>
+<div class="debug-info" id="debugInfo">
+    Debug information will appear here
+</div>
+
+<div class="quality-controls">
+    <h3>Video Quality Settings</h3>
+    <label for="resolution">Resolution:</label>
+    <select id="resolution">
+        <option value="low" selected>Low (320x240)</option>
+        <option value="medium">Medium (640x480)</option>
+        <option value="high">High (1280x720)</option>
+    </select>
+
+    <label for="quality">JPEG Quality:</label>
+    <input type="range" id="quality" min="10" max="100" value="30" step="5">
+    <div class="quality-value" id="qualityValue">Quality: 30%</div>
+
+    <button id="applyQuality">Apply Changes</button>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const container = document.getElementById('controlContainer');
+        const element = document.getElementById('controlElement');
+        const status = document.getElementById('status');
+        const debugInfo = document.getElementById('debugInfo');
+
+        // Quality control elements
+        const videoFeed = document.querySelector('.video-background');
+        const qualitySlider = document.getElementById('quality');
+        const qualityValue = document.getElementById('qualityValue');
+        const resolutionSelect = document.getElementById('resolution');
+        const applyQualityBtn = document.getElementById('applyQuality');
+
+        let isDragging = false;
+        let currentPan = 0;
+        let currentTilt = 0;
+        let debugLog = [];
+
+        // Initialize element at center
+        updateElementPosition(0, 0);
+        updateDebugInfo("Initialized at center");
+
+        // Initialize video feed with default low quality
+        updateVideoQuality();
+
+        // Update quality value display when slider changes
+        qualitySlider.addEventListener('input', function() {
+            qualityValue.textContent = `Quality: ${qualitySlider.value}%`;
+        });
+
+        // Apply quality changes when button is clicked
+        applyQualityBtn.addEventListener('click', function() {
+            updateVideoQuality();
+            updateDebugInfo(`Video quality updated: ${resolutionSelect.value} resolution, ${qualitySlider.value}% quality`);
+        });
+
+        // Function to update video feed with new quality settings
+        function updateVideoQuality() {
+            const quality = qualitySlider.value;
+            const resolution = resolutionSelect.value;
+
+            // Update the video feed source URL with quality parameters
+            const timestamp = new Date().getTime(); // Add timestamp to prevent caching
+            videoFeed.src = `/video_feed?quality=${quality}&resolution=${resolution}&t=${timestamp}`;
+        }
+
+        // Mouse events
+        element.addEventListener('mousedown', startDrag);
+        document.addEventListener('mousemove', drag);
+        document.addEventListener('mouseup', endDrag);
+
+        // Touch events
+        element.addEventListener('touchstart', startDrag);
+        document.addEventListener('touchmove', drag);
+        document.addEventListener('touchend', endDrag);
+
+        // Direct container click/touch
+        container.addEventListener('mousedown', containerClick);
+        container.addEventListener('touchstart', containerClick);
+
+        function startDrag(e) {
+            isDragging = true;
+            updateDebugInfo("Drag started");
+            e.preventDefault();
+        }
+
+        function drag(e) {
+            if (!isDragging) return;
+
+            const containerRect = container.getBoundingClientRect();
+            let clientX, clientY;
+
+            if (e.type.startsWith('touch')) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            } else {
+                clientX = e.clientX;
+                clientY = e.clientY;
+            }
+
+            // Calculate position relative to container center
+            const centerX = containerRect.left + containerRect.width / 2;
+            const centerY = containerRect.top + containerRect.height / 2;
+
+            // Calculate position as percentage from center (-1 to 1)
+            const xPercent = (clientX - centerX) / (containerRect.width / 2);
+            const yPercent = (clientY - centerY) / (containerRect.height / 2);
+
+            // Clamp values to stay within container
+            const clampedX = Math.max(-1, Math.min(1, xPercent));
+            const clampedY = Math.max(-1, Math.min(1, yPercent));
+
+            // Debug position calculation
+            updateDebugInfo(`Position calculation:
+clientX: ${Math.round(clientX)}, centerX: ${Math.round(centerX)}
+xPercent: ${xPercent.toFixed(2)}, clampedX: ${clampedX.toFixed(2)}
+Raw pan value: ${clampedX * 90}`);
+
+            // Update element position
+
+            updateElementPosition(clampedX, clampedY);
+
+            // Convert to pan/tilt values (-90 to 90 degrees)
+            // Explicitly ensure the full range from -90 to 90
+            currentPan = Math.max(-90, Math.min(90, Math.round(clampedX * 90)));
+            currentTilt = Math.max(-90, Math.min(90, Math.round(clampedY * -90))); // Invert Y for tilt
+
+            // Update status display
+            updateStatus();
+
+            // Send values to server
+            sendPosition();
+
+            e.preventDefault();
+        }
+
+        function endDrag() {
+            isDragging = false;
+            updateDebugInfo("Drag ended");
+        }
+
+        function containerClick(e) {
+            // Allow clicking/touching directly on the container
+            const containerRect = container.getBoundingClientRect();
+            let clientX, clientY;
+
+            if (e.type.startsWith('touch')) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            } else {
+                clientX = e.clientX;
+                clientY = e.clientY;
+            }
+
+            // Calculate position relative to container center
+            const centerX = containerRect.left + containerRect.width / 2;
+            const centerY = containerRect.top + containerRect.height / 2;
+
+            // Calculate position as percentage from center (-1 to 1)
+            const xPercent = (clientX - centerX) / (containerRect.width / 2);
+            const yPercent = (clientY - centerY) / (containerRect.height / 2);
+
+            // Clamp values to stay within container
+            const clampedX = Math.max(-1, Math.min(1, xPercent));
+            const clampedY = Math.max(-1, Math.min(1, yPercent));
+
+            // Debug position calculation
+            updateDebugInfo(`Container click:
+clientX: ${Math.round(clientX)}, centerX: ${Math.round(centerX)}
+xPercent: ${xPercent.toFixed(2)}, clampedX: ${clampedX.toFixed(2)}
+Raw pan value: ${clampedX * 90}`);
+
+            // Update element position
+            updateElementPosition(clampedX, clampedY);
+
+            // Convert to pan/tilt values (-90 to 90 degrees)
+            // Explicitly ensure the full range from -90 to 90
+            currentPan = Math.max(-90, Math.min(90, Math.round(clampedX * 90)));
+            currentTilt = Math.max(-90, Math.min(90, Math.round(clampedY * -90))); // Invert Y for tilt
+
+            // Update status display
+            updateStatus();
+
+            // Send values to server
+            sendPosition();
+
+            // Start dragging
+            isDragging = true;
+        }
+
+        function updateElementPosition(xPercent, yPercent) {
+            // Convert -1 to 1 range to percentage within container
+            const leftPercent = 50 + xPercent * 50;
+            const topPercent = 50 + yPercent * 50;
+
+            element.style.left = `${leftPercent}%`;
+            element.style.top = `${topPercent}%`;
+        }
+
+        function updateStatus() {
+            status.textContent = `Pan: ${currentPan}°, Tilt: ${currentTilt}°`;
+        }
+
+        function updateDebugInfo(message) {
+            // Keep only the last 5 debug messages
+            debugLog.unshift(message);
+            if (debugLog.length > 5) {
+                debugLog.pop();
+            }
+
+            // Update the debug info display
+            debugInfo.textContent = debugLog.join('\n\n');
+        }
+
+        function sendPosition() {
+            // Ensure pan values can be negative
+            updateDebugInfo(`Sending values - Pan: ${currentPan}, Tilt: ${currentTilt}`);
+
+            // Send the position to the server
+            // Properly encode URL parameters to handle negative values
+            const encodedPan = encodeURIComponent(currentPan + 1000);
+            const encodedTilt = encodeURIComponent(currentTilt + 1000);
+
+            fetch(`/set/${encodedPan}/${encodedTilt}/0`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! Status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Position set:', data);
+                    console.log('Sent values - Pan:', currentPan, 'Tilt:', currentTilt);
+                })
+                .catch(error => {
+                    console.error('Error setting position:', error);
+                    updateDebugInfo(`Error: ${error.message}`);
+                });
+        }
+    });
+</script>
+</body>
+</html>
