@@ -1,2 +1,0 @@
-quart>=0.20.0
-pantilthat>=0.0.7
