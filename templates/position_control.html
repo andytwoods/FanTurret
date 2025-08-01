@@ -115,14 +115,37 @@
             overflow: hidden; /* Added to ensure the video stays within the container */
         }
 
+        .fullscreen-button {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 30px;
+            height: 30px;
+            background-color: rgba(0, 0, 0, 0.5);
+            border-radius: 4px;
+            cursor: pointer;
+            z-index: 2;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+
+        .fullscreen-button:hover {
+            background-color: rgba(0, 0, 0, 0.7);
+        }
+
         .video-background {
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            object-fit: cover; /* Cover the container while maintaining aspect ratio */
+            object-fit: contain; /* Contain the video within container without stretching */
             z-index: 0; /* Ensure the video is behind other elements */
+            background-color: #000; /* Add black background to fill empty space */
         }
 
         .control-element {
@@ -270,18 +293,23 @@
 
     </style>
     <script type="module">
-    import { FilesetResolver, PoseLandmarker, HandLandmarker, FaceLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.7";
-    // Re-export on window so the non-module script can use the globals.
-    window.FilesetResolver = FilesetResolver;
-    window.PoseLandmarker  = PoseLandmarker;
-    window.HandLandmarker  = HandLandmarker;
-    window.FaceLandmarker  = FaceLandmarker;
-</script>
+        import {
+            FilesetResolver,
+            PoseLandmarker,
+            HandLandmarker,
+            FaceLandmarker
+        } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.7";
+        // Re-export on window so the non-module script can use the globals.
+        window.FilesetResolver = FilesetResolver;
+        window.PoseLandmarker = PoseLandmarker;
+        window.HandLandmarker = HandLandmarker;
+        window.FaceLandmarker = FaceLandmarker;
+    </script>
 </head>
 <body>
 <h1>Pan-Tilt Control</h1>
 <div class="control-container" id="controlContainer">
-    <img src="/video_feed" class="video-background" alt="Webcam Feed">
+    <img src="/video_feed" class="video-background" id="videoFeed" alt="Webcam Feed">
     <canvas id="poseCanvas" class="pose-overlay"></canvas>
     <div class="control-element" id="controlElement"></div>
     <!-- Visual indicators -->
@@ -292,6 +320,7 @@
     <div class="boundary-indicator right-boundary"></div>
     <div class="boundary-indicator top-boundary"></div>
     <div class="boundary-indicator bottom-boundary"></div>
+    <div class="fullscreen-button" id="fullscreenButton">⛶</div>
 </div>
 <div class="status" id="status">
     Pan: 0°, Tilt: 0°
@@ -329,6 +358,7 @@
         const applyQualityBtn = document.getElementById('applyQuality');
         const poseCanvas = document.getElementById('poseCanvas');
         const poseCtx = poseCanvas.getContext('2d');
+        const fullscreenButton = document.getElementById('fullscreenButton');
 
         let isDragging = false;
         let currentPan = 0;
@@ -347,31 +377,34 @@
 
         // --- MODIFIED: Renamed initPose to initMediaPipe and expanded it ---
         async function initMediaPipe() {
-const vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.7/wasm');
+            const vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.7/wasm');
 
-
-
-
-
-
-
-            const baseOptions = { delegate: 'GPU' };
+            const baseOptions = {delegate: 'GPU'};
 
             // Initialize all three landmarkers
             poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-                baseOptions: { ...baseOptions, modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task' },
+                baseOptions: {
+                    ...baseOptions,
+                    modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task'
+                },
                 runningMode: 'IMAGE',
                 numPoses: 1
             });
 
             handLandmarker = await HandLandmarker.createFromOptions(vision, {
-                baseOptions: { ...baseOptions, modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task' },
+                baseOptions: {
+                    ...baseOptions,
+                    modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task'
+                },
                 runningMode: 'IMAGE',
                 numHands: 1
             });
 
             faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
-                baseOptions: { ...baseOptions, modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task' },
+                baseOptions: {
+                    ...baseOptions,
+                    modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task'
+                },
                 runningMode: 'IMAGE',
                 numFaces: 1
             });
@@ -464,8 +497,9 @@ const vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/np
 
                 // --- This is the core control section ---
                 // Update the position of the red dot on screen
-                updateElementPosition(clampedX, clampedY);
-
+                // (updateElementPosition will only update DOM if position has significantly changed)
+                const updated = updateElementPosition(clampedX, clampedY);
+                if (!updated) return;
                 // Update the pan/tilt values from the new dot position
                 currentPan = Math.round(clampedX * 90);
                 currentTilt = Math.round(clampedY * -90); // Invert Y for tilt
@@ -606,8 +640,19 @@ const vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/np
         function updateElementPosition(xPercent, yPercent) {
             const leftPercent = 50 + xPercent * 50;
             const topPercent = 50 + yPercent * 50;
-            element.style.left = `${leftPercent}%`;
-            element.style.top = `${topPercent}%`;
+
+            // Only update DOM if position has changed
+            const currentLeft = element.style.left ? parseFloat(element.style.left) : 50;
+            const currentTop = element.style.top ? parseFloat(element.style.top) : 50;
+
+            if (Math.abs(currentLeft - leftPercent) > 0.01 || Math.abs(currentTop - topPercent) > 0.01) {
+                element.style.left = `${leftPercent}%`;
+                element.style.top = `${topPercent}%`;
+                console.log(`Position updated: (${leftPercent.toFixed(2)}%, ${topPercent.toFixed(2)}%)`);
+                return true
+            } else {
+                return false;
+            }
         }
 
         function updateStatus() {
@@ -626,9 +671,63 @@ const vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/np
             const encodedPan = encodeURIComponent(currentPan + 1000);
             const encodedTilt = encodeURIComponent(currentTilt + 1000);
             fetch(`/set/${encodedPan}/${encodedTilt}/0`)
-                .then(response => { if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`); return response.json(); })
-                .then(data => { console.log('Position set:', data); })
-                .catch(error => { console.error('Error setting position:', error); updateDebugInfo(`Error: ${error.message}`); });
+                .then(response => {
+                    if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Position set:', data);
+                })
+                .catch(error => {
+                    console.error('Error setting position:', error);
+                    updateDebugInfo(`Error: ${error.message}`);
+                });
+        }
+
+        // --- Fullscreen functionality ---
+        fullscreenButton.addEventListener('click', toggleFullscreen);
+
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                // Enter fullscreen
+                if (container.requestFullscreen) {
+                    container.requestFullscreen();
+                } else if (container.webkitRequestFullscreen) { /* Safari */
+                    container.webkitRequestFullscreen();
+                } else if (container.msRequestFullscreen) { /* IE11 */
+                    container.msRequestFullscreen();
+                }
+                updateDebugInfo("Entered fullscreen mode");
+                fullscreenButton.innerHTML = "⤢";
+            } else {
+                // Exit fullscreen
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                } else if (document.webkitExitFullscreen) { /* Safari */
+                    document.webkitExitFullscreen();
+                } else if (document.msExitFullscreen) { /* IE11 */
+                    document.msExitFullscreen();
+                }
+                updateDebugInfo("Exited fullscreen mode");
+                fullscreenButton.innerHTML = "⛶";
+            }
+        }
+
+        // Listen for fullscreen change events to update button icon
+        document.addEventListener('fullscreenchange', updateFullscreenButtonIcon);
+        document.addEventListener('webkitfullscreenchange', updateFullscreenButtonIcon);
+        document.addEventListener('mozfullscreenchange', updateFullscreenButtonIcon);
+        document.addEventListener('MSFullscreenChange', updateFullscreenButtonIcon);
+
+        function updateFullscreenButtonIcon() {
+            if (document.fullscreenElement ||
+                document.webkitFullscreenElement ||
+                document.mozFullScreenElement ||
+                document.msFullscreenElement) {
+                fullscreenButton.innerHTML = "⤢";
+            } else {
+                fullscreenButton.innerHTML = "⛶";
+            }
         }
 
         // --- Initialization and reconnection (unchanged) ---
