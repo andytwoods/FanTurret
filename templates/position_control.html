@@ -115,28 +115,6 @@
             overflow: hidden; /* Added to ensure the video stays within the container */
         }
 
-        .fullscreen-button {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            width: 30px;
-            height: 30px;
-            background-color: rgba(0, 0, 0, 0.5);
-            border-radius: 4px;
-            cursor: pointer;
-            z-index: 2;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 16px;
-            transition: background-color 0.3s;
-        }
-
-        .fullscreen-button:hover {
-            background-color: rgba(0, 0, 0, 0.7);
-        }
-
         .video-background {
             position: absolute;
             top: 0;
@@ -320,7 +298,6 @@
     <div class="boundary-indicator right-boundary"></div>
     <div class="boundary-indicator top-boundary"></div>
     <div class="boundary-indicator bottom-boundary"></div>
-    <div class="fullscreen-button" id="fullscreenButton">⛶</div>
 </div>
 <div class="status" id="status">
     Pan: 0°, Tilt: 0°
@@ -358,7 +335,6 @@
         const applyQualityBtn = document.getElementById('applyQuality');
         const poseCanvas = document.getElementById('poseCanvas');
         const poseCtx = poseCanvas.getContext('2d');
-        const fullscreenButton = document.getElementById('fullscreenButton');
 
         let isDragging = false;
         let currentPan = 0;
@@ -374,6 +350,8 @@
         const trackingGain = 0.1;
         let lastExecutionTime = 0;
         const executionInterval = 100; // ms, to prevent sending too many requests
+        // Define the dead zone size (10% of the video size)
+        const deadZoneSize = 0.1; // 10% of normalized coordinates
 
         // --- MODIFIED: Renamed initPose to initMediaPipe and expanded it ---
         async function initMediaPipe() {
@@ -477,6 +455,12 @@
                 // Calculate the error (how far the target is from the center)
                 const errorX = target.x - 0.5;
                 const errorY = target.y - 0.5;
+                
+                // Check if the target is within the dead zone (center 10% of the screen)
+                if (Math.abs(errorX) < deadZoneSize/2 && Math.abs(errorY) < deadZoneSize/2) {
+                    updateDebugInfo("Target in center - tracking paused");
+                    return; // Stop tracking when target is approximately centered
+                }
 
                 // Calculate the required adjustment using the proportional gain
                 // This creates a small, smooth nudge towards the center
@@ -683,53 +667,6 @@
                     updateDebugInfo(`Error: ${error.message}`);
                 });
         }
-
-        // --- Fullscreen functionality ---
-        fullscreenButton.addEventListener('click', toggleFullscreen);
-
-        function toggleFullscreen() {
-            if (!document.fullscreenElement) {
-                // Enter fullscreen
-                if (container.requestFullscreen) {
-                    container.requestFullscreen();
-                } else if (container.webkitRequestFullscreen) { /* Safari */
-                    container.webkitRequestFullscreen();
-                } else if (container.msRequestFullscreen) { /* IE11 */
-                    container.msRequestFullscreen();
-                }
-                updateDebugInfo("Entered fullscreen mode");
-                fullscreenButton.innerHTML = "⤢";
-            } else {
-                // Exit fullscreen
-                if (document.exitFullscreen) {
-                    document.exitFullscreen();
-                } else if (document.webkitExitFullscreen) { /* Safari */
-                    document.webkitExitFullscreen();
-                } else if (document.msExitFullscreen) { /* IE11 */
-                    document.msExitFullscreen();
-                }
-                updateDebugInfo("Exited fullscreen mode");
-                fullscreenButton.innerHTML = "⛶";
-            }
-        }
-
-        // Listen for fullscreen change events to update button icon
-        document.addEventListener('fullscreenchange', updateFullscreenButtonIcon);
-        document.addEventListener('webkitfullscreenchange', updateFullscreenButtonIcon);
-        document.addEventListener('mozfullscreenchange', updateFullscreenButtonIcon);
-        document.addEventListener('MSFullscreenChange', updateFullscreenButtonIcon);
-
-        function updateFullscreenButtonIcon() {
-            if (document.fullscreenElement ||
-                document.webkitFullscreenElement ||
-                document.mozFullScreenElement ||
-                document.msFullscreenElement) {
-                fullscreenButton.innerHTML = "⤢";
-            } else {
-                fullscreenButton.innerHTML = "⛶";
-            }
-        }
-
         // --- Initialization and reconnection (unchanged) ---
         updateElementPosition(0, 0);
         updateDebugInfo("Initialized at center");

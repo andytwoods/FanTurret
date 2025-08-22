@@ -44,8 +44,7 @@ import cv2
 import numpy as np
 
 from quart import Quart, jsonify, render_template, Response, request
-from stepper_hat_gpio import controller_gpio
-
+from stepper_hat import controller_gpio
 
 # Initialize the webcam variable, but don't open it yet
 # We'll open it in the setup function to ensure proper initialization
