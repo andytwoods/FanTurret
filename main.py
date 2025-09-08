@@ -37,6 +37,7 @@ The server will start on 0.0.0.0:5000
 
 import math
 import os
+import socket
 import sys
 import time
 import asyncio
@@ -44,7 +45,7 @@ import cv2
 import numpy as np
 
 from quart import Quart, jsonify, render_template, Response, request
-from stepper_hat_gpio import controller_gpio
+from stepper_hat_pigpio import controller
 
 
 # Initialize the webcam variable, but don't open it yet
@@ -273,8 +274,8 @@ async def control():
             # Cast a to int for v0.0.2
             a = int(a)
 
-            controller_gpio.pan(a)
-            controller_gpio.tilt(a)
+            controller.pan(a)
+            controller.tilt(a)
 
             # Two decimal places is quite enough!
             angle = round(a, 2)
@@ -314,8 +315,8 @@ async def reset(duration=10):
     """
     # If duration is 0, just set the position once and return
     if duration <= 0:
-        controller_gpio.tilt(0)
-        controller_gpio.pan(0)
+        controller.tilt(0)
+        controller.pan(0)
         return jsonify({"status": "Pan and tilt reset to 0 (one-time)"})
 
     async def generate():
@@ -325,8 +326,8 @@ async def reset(duration=10):
 
         while time.time() < end_time:
             # Continuously send the reset position commands
-            controller_gpio.pan(0)
-            controller_gpio.tilt(0)
+            controller.pan(0)
+            controller.tilt(0)
 
             # Send an update every 100 iterations
             count += 1
@@ -374,8 +375,8 @@ async def set_position(pan, tilt, duration=10):
 
     # If duration is 0, just set the position once and return
     if duration <= 0:
-        controller_gpio.pan(pan)
-        controller_gpio.tilt(tilt)
+        controller.pan(pan)
+        controller.tilt(tilt)
 
         return jsonify({
             "status": "Position set (one-time)",
@@ -390,8 +391,8 @@ async def set_position(pan, tilt, duration=10):
 
         while time.time() < end_time:
             # Continuously send the same position commands to maintain the position
-            controller_gpio.pan(pan)
-            controller_gpio.tilt(tilt)
+            controller.pan(pan)
+            controller.tilt(tilt)
 
             # Send an update every 100 iterations
             count += 1
@@ -869,7 +870,7 @@ async def video_feed():
 
 # Setup and cleanup functions for proper resource management
 @app.before_serving
-async def setup():
+async def setup_camera():
     global camera
     print("Starting Fan Turret application...")
 
@@ -892,6 +893,21 @@ async def setup():
         print("WARNING: Failed to initialize camera during startup. Will try again when needed.")
     else:
         print("Camera successfully initialized during startup.")
+
+@app.before_serving
+async def announce_ip_address():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        # Doesn't need to be reachable, just used to determine the primary interface
+        s.connect(('10.255.255.255', 1))
+        ip_address = s.getsockname()[0]
+    except Exception:
+        ip_address = '127.0.0.1'
+    finally:
+        s.close()
+    print(
+        f"Access position control interface at: http://{ip_address}:5000/position_control")
+
 
 @app.after_serving
 async def cleanup():

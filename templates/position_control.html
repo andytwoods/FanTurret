@@ -286,6 +286,10 @@
 </head>
 <body>
 <h1>Pan-Tilt Control</h1>
+<div style="width:300px; margin-bottom:10px; display:flex; align-items:center; gap:8px;">
+    <label for="cvToggle" style="flex:1;">Computer vision tracking</label>
+    <input type="checkbox" id="cvToggle">
+</div>
 <div class="control-container" id="controlContainer">
     <img src="/video_feed" class="video-background" id="videoFeed" alt="Webcam Feed">
     <canvas id="poseCanvas" class="pose-overlay"></canvas>
@@ -346,6 +350,7 @@
         let handLandmarker;
         let faceLandmarker;
         let mediaPipeReady = false;
+        let cvEnabled = false; // default OFF
         // Proportional gain for the controller. A small value creates smooth movement.
         const trackingGain = 0.1;
         let lastExecutionTime = 0;
@@ -404,15 +409,17 @@
             }
 
             // --- MODIFIED: Call auto-tracking logic ---
-            autoTrack();
+            if (cvEnabled) { autoTrack(); }
 
             // Drawing logic (can be kept to visualize detections)
-            const poseResults = poseLandmarker.detect(videoFeed);
             poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
             poseCtx.drawImage(videoFeed, 0, 0, poseCanvas.width, poseCanvas.height);
 
-            if (poseResults.landmarks?.length) {
-                drawSkeleton(poseResults.landmarks[0]);
+            if (cvEnabled && poseLandmarker) {
+                const poseResults = poseLandmarker.detect(videoFeed);
+                if (poseResults.landmarks?.length) {
+                    drawSkeleton(poseResults.landmarks[0]);
+                }
             }
 
             requestAnimationFrame(processFrame);
@@ -433,14 +440,14 @@
             let target = null;
 
             // 1. Check for hands (highest priority)
-            const handResults = handLandmarker.detect(videoFeed);
+            const handResults = handLandmarker && cvEnabled ? handLandmarker.detect(videoFeed) : {landmarks: []};
             if (handResults.landmarks?.length) {
                 // Use the wrist as the target center
                 target = handResults.landmarks[0][0];
                 updateDebugInfo("Tracking hand");
             } else {
                 // 2. If no hands, check for faces
-                const faceResults = faceLandmarker.detect(videoFeed);
+                const faceResults = faceLandmarker && cvEnabled ? faceLandmarker.detect(videoFeed) : {faceLandmarks: []};
                 if (faceResults.faceLandmarks?.length) {
                     // Use the nose tip as the target center
                     target = faceResults.faceLandmarks[0][1];
@@ -527,7 +534,19 @@
 
         // MODIFIED: Call initMediaPipe instead of initPose
         videoFeed.addEventListener('load', () => {
-            if (!mediaPipeReady) initMediaPipe();
+            const cvToggle = document.getElementById('cvToggle');
+            // Only initialize MediaPipe when CV is enabled for the first time
+            const maybeInit = () => { if (!mediaPipeReady && cvEnabled) initMediaPipe(); };
+            cvToggle.addEventListener('change', () => {
+                cvEnabled = cvToggle.checked;
+                updateDebugInfo(`Computer vision ${cvEnabled ? 'enabled' : 'disabled'}`);
+                maybeInit();
+            });
+            // Ensure default OFF state
+            cvToggle.checked = false;
+            cvEnabled = false;
+            // Try init only if enabled
+            maybeInit();
         });
 
         qualitySlider.addEventListener('input', function () {
