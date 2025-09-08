@@ -8,6 +8,7 @@ A web-based control system for a pan-tilt mechanism with camera integration. Thi
 - Live video streaming from attached camera
 - Manual control via mouse/touch interface
 - Auto-tracking of faces and hands using MediaPipe
+- ArUco marker detection endpoint for calibration
 - Adjustable video quality settings
 - Fullscreen mode for better control
 - REST API for programmatic control
@@ -73,3 +74,4 @@ Below is a demonstration of the hardware in action:
 - `/reset/<duration>` - Reset to center position
 - `/video_feed` - Camera video stream
 - `/camera_diagnostics` - Camera diagnostic information
+- `/start_calibration` - POST; detects ArUco markers (IDs 1 & 2) in current frame

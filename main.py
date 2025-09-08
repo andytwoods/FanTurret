@@ -1,39 +1,4 @@
 #!/usr/bin/env python
-"""
-Fan Turret Control API
-
-This is a Quart-based web application that provides control over a pan-tilt mechanism.
-The application exposes several endpoints:
-
-Control Endpoints:
-- GET /: Returns a status message indicating the service is running
-- GET /control: Starts the automatic control mode with a sine wave pattern and returns
-  a stream of Server-Sent Events with position updates
-- GET /reset: Resets the pan and tilt positions to 0 and maintains the position for 10 seconds by default
-- GET /reset/<duration>: Resets the pan and tilt positions to 0 and maintains the position
-  for the specified duration (in seconds)
-- GET /set/<pan>/<tilt>: Sets the pan and tilt to specific values (between -90 and 90)
-  and maintains the position for 10 seconds by default
-- GET /set/<pan>/<tilt>/<duration>: Sets the pan and tilt to specific values and maintains
-  the position for the specified duration (in seconds)
-- GET /position_control: Serves an HTML page with a visual interface for controlling the pan and tilt
-  mechanism using mouse or touch input
-- GET /video_feed: Streams video from the webcam as a multipart response with JPEG frames
-
-Diagnostic Endpoints:
-- GET /camera_diagnostics: Returns detailed diagnostic information about the camera
-- GET /camera_errors: Returns the most recent camera error logs
-- GET /reset_camera: Forcibly resets the camera
-- GET /configure_camera: Allows manually configuring camera parameters via query parameters:
-  - primary_index: The primary camera index to use
-  - aggressive_reset: Whether to use aggressive reset (true/false)
-  - max_init_attempts: Maximum number of initialization attempts
-
-To run the application:
-    python main.py
-
-The server will start on 0.0.0.0:5000
-"""
 
 import math
 import os
@@ -45,6 +10,8 @@ import cv2
 import numpy as np
 
 from quart import Quart, jsonify, render_template, Response, request
+
+from calibration import calibrate
 from stepper_hat_pigpio import controller
 
 
@@ -425,6 +392,12 @@ async def position_control():
         HTML: An HTML page with the control interface.
     """
     return await render_template('position_control.html')
+
+@app.route('/start_calibration', methods=['POST'])
+async def start_calibration():
+    return calibrate(camera)
+
+
 
 @app.route('/camera_diagnostics')
 async def camera_diagnostics():

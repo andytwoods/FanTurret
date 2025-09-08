@@ -290,6 +290,9 @@
     <label for="cvToggle" style="flex:1;">Computer vision tracking</label>
     <input type="checkbox" id="cvToggle">
 </div>
+<div style="width:300px; margin-bottom:10px; display:flex; gap:8px;">
+    <button id="startCalibrationBtn" style="flex:1; background-color:#2196F3; color:#fff; border:none; padding:8px 12px; border-radius:4px; cursor:pointer;">Start calibration</button>
+</div>
 <div class="control-container" id="controlContainer">
     <img src="/video_feed" class="video-background" id="videoFeed" alt="Webcam Feed">
     <canvas id="poseCanvas" class="pose-overlay"></canvas>
@@ -358,6 +361,12 @@
         // Define the dead zone size (10% of the video size)
         const deadZoneSize = 0.1; // 10% of normalized coordinates
 
+        // --- NEW: ArUco marker detection variables ---
+        let detectedMarkers = {};
+        let showArUcoMarkers = false;
+        let lastArUcoDetection = 0;
+        const arUcoDetectionInterval = 1000; // Check for markers every 1000ms
+
         // --- MODIFIED: Renamed initPose to initMediaPipe and expanded it ---
         async function initMediaPipe() {
             const vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.7/wasm');
@@ -398,7 +407,7 @@
         }
 
         function processFrame() {
-            if (!mediaPipeReady || videoFeed.naturalWidth === 0) {
+            if (videoFeed.naturalWidth === 0) {
                 requestAnimationFrame(processFrame);
                 return;
             }
@@ -408,21 +417,95 @@
                 poseCanvas.height = videoFeed.naturalHeight;
             }
 
-            // --- MODIFIED: Call auto-tracking logic ---
-            if (cvEnabled) { autoTrack(); }
+            // --- NEW: ArUco marker detection ---
+            const now = Date.now();
+            if (showArUcoMarkers && (now - lastArUcoDetection > arUcoDetectionInterval)) {
+                detectArUcoMarkers();
+                lastArUcoDetection = now;
+            }
 
-            // Drawing logic (can be kept to visualize detections)
+            // --- MODIFIED: Call auto-tracking logic ---
+            if (cvEnabled && mediaPipeReady) { autoTrack(); }
+
+            // Drawing logic
             poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
             poseCtx.drawImage(videoFeed, 0, 0, poseCanvas.width, poseCanvas.height);
 
-            if (cvEnabled && poseLandmarker) {
+            // Draw MediaPipe results
+            if (cvEnabled && mediaPipeReady && poseLandmarker) {
                 const poseResults = poseLandmarker.detect(videoFeed);
                 if (poseResults.landmarks?.length) {
                     drawSkeleton(poseResults.landmarks[0]);
                 }
             }
 
+            // Draw ArUco markers
+            if (showArUcoMarkers) {
+                drawArUcoMarkers();
+            }
+
             requestAnimationFrame(processFrame);
+        }
+
+        // --- NEW: ArUco marker detection function ---
+        async function detectArUcoMarkers() {
+            try {
+                const response = await fetch('/start_calibration', { method: 'POST' });
+                const data = await response.json();
+
+                if (data.status === 'success' && data.found) {
+                    detectedMarkers = data.markers;
+                    // Scale marker positions to match canvas size
+                    for (const markerId in detectedMarkers) {
+                        const marker = detectedMarkers[markerId];
+                        marker.canvasX = (marker.center.x / data.image_size.width) * poseCanvas.width;
+                        marker.canvasY = (marker.center.y / data.image_size.height) * poseCanvas.height;
+                    }
+                } else {
+                    detectedMarkers = {};
+                }
+            } catch (error) {
+                console.error('ArUco detection error:', error);
+                detectedMarkers = {};
+            }
+        }
+
+        // --- NEW: Draw ArUco markers on canvas ---
+        function drawArUcoMarkers() {
+            for (const markerId in detectedMarkers) {
+                const marker = detectedMarkers[markerId];
+                const x = marker.canvasX;
+                const y = marker.canvasY;
+
+                // Draw marker outline (green square)
+                poseCtx.strokeStyle = '#00ff00';
+                poseCtx.lineWidth = 3;
+                poseCtx.beginPath();
+                poseCtx.rect(x - 20, y - 20, 40, 40);
+                poseCtx.stroke();
+
+                // Draw marker ID
+                poseCtx.fillStyle = '#00ff00';
+                poseCtx.font = '16px Arial';
+                poseCtx.textAlign = 'center';
+                poseCtx.fillText(`ID: ${markerId}`, x, y - 25);
+
+                // Draw marker type
+                poseCtx.font = '12px Arial';
+                let markerType = '';
+                if (markerId === '1') markerType = 'TOP-LEFT';
+                else if (markerId === '2') markerType = 'BOTTOM-RIGHT';
+
+                if (markerType) {
+                    poseCtx.fillText(markerType, x, y + 30);
+                }
+
+                // Draw center dot
+                poseCtx.fillStyle = '#ff0000';
+                poseCtx.beginPath();
+                poseCtx.arc(x, y, 3, 0, Math.PI * 2);
+                poseCtx.fill();
+            }
         }
 
         // --- NEW: Auto-tracking function ---
@@ -462,7 +545,7 @@
                 // Calculate the error (how far the target is from the center)
                 const errorX = target.x - 0.5;
                 const errorY = target.y - 0.5;
-                
+
                 // Check if the target is within the dead zone (center 10% of the screen)
                 if (Math.abs(errorX) < deadZoneSize/2 && Math.abs(errorY) < deadZoneSize/2) {
                     updateDebugInfo("Target in center - tracking paused");
@@ -686,12 +769,15 @@
                     updateDebugInfo(`Error: ${error.message}`);
                 });
         }
-        // --- Initialization and reconnection (unchanged) ---
+        // --- Initialization and reconnection (modified to start processing loop) ---
         updateElementPosition(0, 0);
         updateDebugInfo("Initialized at center");
         updateVideoQuality();
         setupVideoReconnection();
         setupPeriodicRefresh();
+
+        // Start the processing loop for ArUco detection even without MediaPipe
+        requestAnimationFrame(processFrame);
 
         function setupVideoReconnection() {
             videoFeed.addEventListener('error', function (e) {
@@ -710,6 +796,29 @@
                 updateDebugInfo('Performing periodic video feed refresh');
                 updateVideoQuality();
             }, 25000);
+        }
+
+        // Start calibration button handler - now toggles ArUco visualization
+        const startCalBtn = document.getElementById('startCalibrationBtn');
+        if (startCalBtn) {
+            startCalBtn.addEventListener('click', () => {
+                showArUcoMarkers = !showArUcoMarkers;
+
+                if (showArUcoMarkers) {
+                    startCalBtn.textContent = 'Stop ArUco Detection';
+                    startCalBtn.style.backgroundColor = '#ff5722';
+                    updateDebugInfo('ArUco marker detection enabled');
+                    // Start processing loop if not already running
+                    if (!mediaPipeReady) {
+                        requestAnimationFrame(processFrame);
+                    }
+                } else {
+                    startCalBtn.textContent = 'Start Calibration';
+                    startCalBtn.style.backgroundColor = '#2196F3';
+                    updateDebugInfo('ArUco marker detection disabled');
+                    detectedMarkers = {};
+                }
+            });
         }
     });
 </script>
