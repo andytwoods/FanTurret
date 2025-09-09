@@ -395,7 +395,7 @@ async def position_control():
 
 @app.route('/start_calibration', methods=['POST'])
 async def start_calibration():
-    return calibrate(camera)
+    return calibrate(camera, controller)
 
 
 
