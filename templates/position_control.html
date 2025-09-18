@@ -283,12 +283,15 @@
         window.HandLandmarker = HandLandmarker;
         window.FaceLandmarker = FaceLandmarker;
     </script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
 </head>
 <body>
 <h1>Pan-Tilt Control</h1>
-<div style="width:300px; margin-bottom:10px; display:flex; align-items:center; gap:8px;">
+<div id='controls' style="width:300px; margin-bottom:10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
     <label for="cvToggle" style="flex:1;">Computer vision tracking</label>
     <input type="checkbox" id="cvToggle">
+    <button id="rememberBtn" class="btn btn-sm btn-outline-secondary" title="Remember current pan/tilt">Remember</button>
+    <div id="rememberedList" class="d-flex flex-wrap gap-1 w-100 mt-1"></div>
 </div>
 <div style="width:300px; margin-bottom:10px; display:flex; gap:8px;">
     <button id="startCalibrationBtn" style="flex:1; background-color:#2196F3; color:#fff; border:none; padding:8px 12px; border-radius:4px; cursor:pointer;">Start calibration</button>
@@ -342,11 +345,85 @@
         const applyQualityBtn = document.getElementById('applyQuality');
         const poseCanvas = document.getElementById('poseCanvas');
         const poseCtx = poseCanvas.getContext('2d');
+        const rememberBtn = document.getElementById('rememberBtn');
+        const rememberedListDiv = document.getElementById('rememberedList');
 
         let isDragging = false;
         let currentPan = 0;
         let currentTilt = 0;
         let debugLog = [];
+
+        // Remembered positions (persisted in localStorage)
+        let rememberedPositions = [];
+        const REMEMBER_KEY = 'rememberedPositions';
+        function loadRemembered() {
+            try {
+                const raw = localStorage.getItem(REMEMBER_KEY);
+                rememberedPositions = raw ? JSON.parse(raw) : [];
+                if (!Array.isArray(rememberedPositions)) rememberedPositions = [];
+            } catch (e) { rememberedPositions = []; }
+        }
+        function saveRemembered() {
+            localStorage.setItem(REMEMBER_KEY, JSON.stringify(rememberedPositions));
+        }
+        function renderRemembered() {
+            if (!rememberedListDiv) return;
+            rememberedListDiv.innerHTML = '';
+            rememberedPositions.forEach((pos, index) => {
+                const badge = document.createElement('span');
+                badge.className = 'badge text-bg-secondary';
+                badge.dataset.index = String(index);
+                badge.style.userSelect = 'none';
+                badge.innerHTML = `(pan=${pos.pan}, tilt=${pos.tilt}) `+
+                    `<span role="button" title="Play" data-action="play" data-index="${index}" style="cursor:pointer; margin-left:6px;">&#9654;</span>`+
+                    `<span role="button" title="Remove" data-action="remove" data-index="${index}" class="ms-1" style="cursor:pointer; font-weight:bold;">&times;</span>`;
+                rememberedListDiv.appendChild(badge);
+            });
+        }
+
+        if (rememberBtn) {
+            rememberBtn.addEventListener('click', () => {
+                rememberedPositions.push({ pan: currentPan, tilt: currentTilt });
+                saveRemembered();
+                renderRemembered();
+            });
+        }
+        if (rememberedListDiv) {
+            rememberedListDiv.addEventListener('click', (e) => {
+                const target = e.target;
+                if (!(target instanceof HTMLElement)) return;
+                const action = target.getAttribute('data-action');
+                const idxStr = target.getAttribute('data-index');
+                if (!action || idxStr === null) return;
+                const idx = parseInt(idxStr, 10);
+                if (Number.isNaN(idx) || idx < 0 || idx >= rememberedPositions.length) return;
+                if (action === 'remove') {
+                    rememberedPositions.splice(idx, 1);
+                    saveRemembered();
+                    renderRemembered();
+                } else if (action === 'play') {
+                    const pos = rememberedPositions[idx];
+                    if (pos) moveTo(pos.pan, pos.tilt);
+                }
+            });
+        }
+
+        function moveTo(pan, tilt) {
+            // clamp inputs
+            const clampedPan = Math.max(-90, Math.min(90, Math.round(pan)));
+            const clampedTilt = Math.max(-90, Math.min(90, Math.round(tilt)));
+            const x = clampedPan / 90.0;
+            const y = -clampedTilt / 90.0; // invert Y
+            updateElementPosition(x, y);
+            currentPan = clampedPan;
+            currentTilt = clampedTilt;
+            updateStatus();
+            sendPosition();
+        }
+
+        // Load and render remembered positions on startup
+        loadRemembered();
+        renderRemembered();
 
         // --- NEW: Variables for MediaPipe and Auto-tracking ---
         let poseLandmarker;

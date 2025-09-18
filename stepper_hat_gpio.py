@@ -43,7 +43,7 @@ M2_MODE                 = (21, 22, 27)   # MODE0, MODE1, MODE2
 
 # Microstepping – set to match your DIP (or leave FULL and set all DIP OFF)
 # Valid: 'FULL','HALF','1/4','1/8','1/16','1/32'
-MICROSTEP = 'FULL'
+MICROSTEP = '1/16'
 _MICRO_TABLE = {
     'FULL': (0,0,0),
     'HALF': (1,0,0),

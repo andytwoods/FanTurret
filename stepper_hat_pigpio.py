@@ -36,7 +36,7 @@ M1_MODE = (16, 17, 20)
 M2_DIR, M2_STEP, M2_EN = 24, 18, 4  # Y / tilt
 M2_MODE = (21, 22, 27)
 
-MICROSTEP = '1/16'
+MICROSTEP = '1/32'
 _MICRO_TABLE = {
     'FULL': (0, 0, 0),
     'HALF': (1, 0, 0),

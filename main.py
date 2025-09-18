@@ -12,7 +12,25 @@ import numpy as np
 from quart import Quart, jsonify, render_template, Response, request
 
 from calibration import calibrate
-from stepper_hat_pigpio import controller
+# Select motor backend at import time based on env var STEPPER_BACKEND
+backend = os.getenv("STEPPER_BACKEND", "pigpio").lower()
+try:
+    if backend in ("rpimotorlib", "rpi"):
+        from stepper_hat_rpimotorlib import controller  # type: ignore
+        print("Using RpiMotorLib backend")
+    elif backend in ("gpio",):
+        from stepper_hat_gpio import controller_gpio as controller  # type: ignore
+        print("Using GPIO backend")
+    else:
+        from stepper_hat_pigpio import controller  # default
+        print("Using pigpio backend")
+except Exception as _backend_err:
+    print(f"Backend '{backend}' failed to load: {_backend_err}. Falling back to GPIO if available...")
+    try:
+        from stepper_hat_gpio import controller_gpio as controller  # type: ignore
+        print("Fell back to GPIO backend")
+    except Exception as _gpio_err:
+        raise RuntimeError(f"No motor backend available. rpimotorlib error: {_backend_err}; gpio error: {_gpio_err}")
 
 
 # Initialize the webcam variable, but don't open it yet
